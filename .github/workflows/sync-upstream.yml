@@ -1,0 +1,64 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: "0 0 * * 1"  # every Monday
+  workflow_dispatch:      # manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/decolua/9router.git
+          git fetch upstream
+
+      - name: Check for new upstream commits
+        run: |
+          BEHIND=$(git rev-list --count HEAD..upstream/master)
+          echo "Behind by $BEHIND commits"
+          echo "behind=$BEHIND" >> $GITHUB_OUTPUT
+        id: check
+
+      - name: Try auto-merge
+        if: steps.check.outputs.behind > 0
+        run: |
+          git config user.name "sisyphus"
+          git config user.email "sisyphus@users.noreply.github.com"
+          git merge upstream/master --no-edit 2>&1 || echo "conflict=true" >> $GITHUB_OUTPUT
+        id: merge
+
+      - name: Push if clean merge
+        if: steps.check.outputs.behind > 0 && !steps.merge.outputs.conflict
+        run: git push origin master
+
+      - name: Create PR on conflict
+        if: steps.merge.outputs.conflict
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: "chore: sync upstream (conflict needs resolve)"
+          body: |
+            Auto-sync dari `decolua/9router` gagal karena conflict.
+            File kena conflict biasanya:
+            - `package.json` (port, scripts)
+            - `Sidebar.js` (nav items)
+
+            **Resolve lewat GitHub web editor atau lokal:**
+            ```bash
+            git checkout master
+            git pull upstream master
+            # resolve conflict
+            git commit -m "chore: resolve upstream sync conflict"
+            git push
+            ```
+          branch: auto-sync-upstream
+          delete-branch: true
